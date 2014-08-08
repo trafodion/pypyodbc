@@ -25,7 +25,7 @@ pooling = True
 apilevel = '2.0'
 paramstyle = 'qmark'
 threadsafety = 1
-version = '1.3.1'
+version = '1.3.1.1-unsupported'
 lowercase=True
 
 DEBUG = 0
@@ -948,7 +948,7 @@ def ctrl_err(ht, h, val_ret, ansi):
             #No more data, I can raise
             #print(err_list[0][1])
             state = err_list[0][0]
-            err_text = raw_s('[')+state+raw_s('] ')+err_list[0][1]
+            err_text = '; '.join(map(str, err_list))
             if state[:2] in (raw_s('24'),raw_s('25'),raw_s('42')):
                 raise ProgrammingError(state,err_text)
             elif state[:2] in (raw_s('22')):
