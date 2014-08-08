@@ -25,7 +25,7 @@ pooling = True
 apilevel = '2.0'
 paramstyle = 'qmark'
 threadsafety = 1
-version = '1.3.1.1-unsupported'
+version = '1.3.3.1-unsupported'
 lowercase=True
 
 DEBUG = 0
@@ -89,7 +89,7 @@ SQL_ATTR_AUTOCOMMIT = SQL_AUTOCOMMIT = 102
 SQL_MODE_DEFAULT = SQL_MODE_READ_WRITE = 0; SQL_MODE_READ_ONLY = 1
 SQL_AUTOCOMMIT_OFF, SQL_AUTOCOMMIT_ON = 0, 1
 SQL_IS_UINTEGER = -5
-SQL_ATTR_LOGIN_TIMEOUT = 103; SQL_ATTR_CONNECTION_TIMEOUT = 113
+SQL_ATTR_LOGIN_TIMEOUT = 103; SQL_ATTR_CONNECTION_TIMEOUT = 113;SQL_ATTR_QUERY_TIMEOUT = 0
 SQL_COMMIT, SQL_ROLLBACK = 0, 1
 
 SQL_INDEX_UNIQUE,SQL_INDEX_ALL = 0,1
@@ -698,6 +698,7 @@ funcs_with_ret = [
     "SQLStatisticsW",
     "SQLTables",
     "SQLTablesW",
+    "SQLSetStmtAttr"
 ]
 
 for func_name in funcs_with_ret:
@@ -948,6 +949,7 @@ def ctrl_err(ht, h, val_ret, ansi):
             #No more data, I can raise
             #print(err_list[0][1])
             state = err_list[0][0]
+            # A.C : Changed so all error messages are joined by semi-colon
             err_text = '; '.join(map(str, err_list))
             if state[:2] in (raw_s('24'),raw_s('25'),raw_s('42')):
                 raise ProgrammingError(state,err_text)
@@ -1170,10 +1172,19 @@ class Cursor:
         self.arraysize = 1
         ret = ODBC_API.SQLAllocHandle(SQL_HANDLE_STMT, self.connection.dbc_h, ADDR(self.stmt_h))
         check_success(self, ret)
+    
+        self.timeout = conx.timeout
+        if self.timeout != 0:
+            self.set_timeout(self.timeout)
+        
         self._PARAM_SQL_TYPE_LIST = []
         self.closed = False      
 
-            
+    def set_timeout(self, timeout):
+        self.timeout = timeout
+        ret = ODBC_API.SQLSetStmtAttr(self.stmt_h, SQL_ATTR_QUERY_TIMEOUT, self.timeout, 0)
+        check_success(self, ret)
+        
     def prepare(self, query_string):
         """prepare a query"""
         
@@ -2370,11 +2381,15 @@ class Cursor:
     def __enter__(self):
         return self
 
+
+
+
+
     
 # This class implement a odbc connection. 
 #
 #
-
+connection_timeout = 0
 
 class Connection:
     def __init__(self, connectString = '', autocommit = False, ansi = False, timeout = 0, unicode_results = use_unicode, readonly = False, **kargs):
@@ -2386,6 +2401,7 @@ class Connection:
         self.dbc_h = ctypes.c_void_p()
         self.autocommit = autocommit
         self.readonly = False
+        # the query timeout value
         self.timeout = 0
         # self._cursors = []
         for key, value in list(kargs.items()):
@@ -2410,10 +2426,18 @@ class Connection:
         
         ret = ODBC_API.SQLAllocHandle(SQL_HANDLE_DBC, shared_env_h, ADDR(self.dbc_h))
         check_success(self, ret)
+
+        self.connection_timeout = connection_timeout
+        if self.connection_timeout != 0:
+            self.set_connection_timeout(connection_timeout)
+
         
         self.connect(connectString, autocommit, ansi, timeout, unicode_results, readonly)
         
-            
+    def set_connection_timeout(self,connection_timeout):
+        self.connection_timeout = connection_timeout
+        ret = ODBC_API.SQLSetConnectAttr(self.dbc_h, SQL_ATTR_CONNECTION_TIMEOUT, connection_timeout, SQL_IS_UINTEGER);
+        check_success(self, ret)
      
     def connect(self, connectString = '', autocommit = False, ansi = False, timeout = 0, unicode_results = use_unicode, readonly = False):
         """Connect to odbc, using connect strings and set the connection's attributes like autocommit and timeout
@@ -2423,11 +2447,8 @@ class Connection:
         # Before we establish the connection by the connection string
         # Set the connection's attribute of "timeout" (Actully LOGIN_TIMEOUT)
         if timeout != 0:
-            self.settimeout(timeout)
             ret = ODBC_API.SQLSetConnectAttr(self.dbc_h, SQL_ATTR_LOGIN_TIMEOUT, timeout, SQL_IS_UINTEGER);
             check_success(self, ret)
-
-
         # Create one connection with a connect string by calling SQLDriverConnect
         # and make self.dbc_h the handle of this connection
 
@@ -2476,9 +2497,9 @@ class Connection:
         # Set the connection's attribute of "readonly" 
         #
         self.readonly = readonly
-        
-        ret = ODBC_API.SQLSetConnectAttr(self.dbc_h, SQL_ATTR_ACCESS_MODE, self.readonly and SQL_MODE_READ_ONLY or SQL_MODE_READ_WRITE, SQL_IS_UINTEGER)
-        check_success(self, ret)
+        if self.readonly == True:
+            ret = ODBC_API.SQLSetConnectAttr(self.dbc_h, SQL_ATTR_ACCESS_MODE, SQL_MODE_READ_ONLY, SQL_IS_UINTEGER)
+            check_success(self, ret)
         
         self.unicode_results = unicode_results
         self.connected = 1
@@ -2493,10 +2514,6 @@ class Connection:
     def add_output_converter(self, sqltype, func):
         self.output_converter[sqltype] = func
     
-    def settimeout(self, timeout):
-        ret = ODBC_API.SQLSetConnectAttr(self.dbc_h, SQL_ATTR_CONNECTION_TIMEOUT, timeout, SQL_IS_UINTEGER);
-        check_success(self, ret)
-        self.timeout = timeout
         
 
     def ConnectByDSN(self, dsn, user, passwd = ''):
